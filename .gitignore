@@ -1,0 +1,5 @@
+data/snapshot*.json
+output/slack_message.txt
+__pycache__/
+*.pyc
+.env
