@@ -28,7 +28,7 @@ Shopify の在庫レポートを実行して。
 【2. Slack 投稿】
 `output/slack_message.txt` の中身を **一字一句そのまま** 指定チャンネルへ投稿する。
 要約・省略・言い換えはしない（数字が変わると意味がないため）。
-投稿先チャンネル: <ここに実際のチャンネル名を記入>
+投稿先チャンネル: #project_goabroad_hk_shopify （ID: C0B5A8DMQTS）
 
 【3. 永続化】
 `data/snapshot*.json` と `output/slack_message.txt` は .gitignore 済みなので

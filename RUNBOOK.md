@@ -8,7 +8,7 @@ Claude Code の環境設定（Environment）の環境変数に登録する。
 | 変数 | 必須 | 既定値 | 説明 |
 |---|---|---|---|
 | `SHOPIFY_STORE_DOMAIN` | ✅ | — | `xxxx.myshopify.com`。管理画面のURLではなくmyshopifyドメイン |
-| `SHOPIFY_ADMIN_TOKEN` | ✅ | — | カスタムアプリのアクセストークン（`shpat_...`） |
+| `SHOPIFY_ADMIN_TOKEN` | ✅ | — | カスタムアプリのアクセストークン（**`shpat_` で始まる**） |
 | `SHOPIFY_API_VERSION` | | `2026-07` | 400が出たら1つ前の四半期版に下げる |
 | `SHOPIFY_LOW_STOCK_THRESHOLD` | | `5` | この数以下を「在庫少」と判定 |
 | `SHOPIFY_FULL_REPORT_HOUR_JST` | | `9` | auto モードで全件を出す時刻（JST） |
@@ -18,6 +18,11 @@ Shopify管理画面 → 設定 → アプリと販売チャネル → アプリ�
 → Admin API 統合を構成 → スコープに `read_inventory` / `read_products` /
 `read_locations` を付与 → 保存 → インストール → Admin API アクセストークンを表示。
 **トークンは一度しか表示されない。**
+
+> ⚠️ **取り違え注意**: 「APIの資格情報」タブには3つ並んでいる。
+> 必要なのは一番上の **Admin API アクセストークン（`shpat_`）** だけ。
+> 下の **APIキー** と **APIシークレットキー（`shpss_`）** は用途が違い、
+> `X-Shopify-Access-Token` に入れても 401 になる。
 
 ## 2. 実行手順
 
@@ -67,6 +72,7 @@ python3 scripts/format_report.py       # 標準出力に POST / NO_POST
 
 | 症状 | 原因と対処 |
 |---|---|
+| `Invalid API key or access token` (401) | **まずトークンの接頭辞を見る。`shpss_` ならAPIシークレットキーを入れてしまっている**（別物）。正しいのは `shpat_` |
 | `認証失敗 (HTTP 401/403)` | トークンが誤り、または期限切れ／スコープ不足。3つのスコープを確認 |
 | `エンドポイントが見つかりません` | ドメインが `xxxx.myshopify.com` 形式か確認。APIバージョンも確認 |
 | `GraphQL errors` に `available` | APIバージョンが古い。`SHOPIFY_API_VERSION` を上げる |
