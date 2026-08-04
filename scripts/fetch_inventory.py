@@ -58,6 +58,7 @@ def main():
     snapshot = {
         "fetched_at": datetime.now(JST).isoformat(),
         "store": cfg["store"],
+        "shop_name": sl.fetch_shop_name(sess, cfg),
         "api_version": cfg["version"],
         "warnings": warnings,
         "rows": rows,

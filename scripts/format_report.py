@@ -27,6 +27,24 @@ JST = timezone(timedelta(hours=9))
 THRESHOLD = int(os.environ.get("SHOPIFY_LOW_STOCK_THRESHOLD", "5"))
 FULL_HOUR = int(os.environ.get("SHOPIFY_FULL_REPORT_HOUR_JST", "9"))
 
+# バリエーション名が曜日を含む場合は曜日順に並べる（配送枠の運用に合わせる）。
+# アルファベット順だと Fri, Mon, Sat… となって読めないため。
+WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def variant_sort_key(row):
+    name = (row.get("variant") or "").lower()
+    for i, d in enumerate(WEEKDAYS):
+        if d in name:
+            return (0, i, name)
+    return (1, 0, name)
+
+
+def single_location(rows):
+    """ロケーションが1種類だけならその名前を返す。複数なら None。"""
+    locs = {r.get("location") for r in rows if r.get("location")}
+    return locs.pop() if len(locs) == 1 else None
+
 
 def load(path):
     if not os.path.exists(path):
@@ -39,8 +57,12 @@ def key(row):
     return (row.get("variant_id"), row.get("location"))
 
 
-def label(row):
-    """商品名 / バリエーション / ロケーション の表示名。"""
+def label(row, omit_location=False):
+    """商品名 / バリエーション / ロケーション の表示名。
+
+    omit_location=True のときはロケーションを省く（拠点が1つのとき、
+    全行に同じ名前が並ぶのを避けるため。拠点名はヘッダーに出す）。
+    """
     name = row.get("product") or "(商品名なし)"
     variant = row.get("variant")
     if variant and variant != "Default Title":
@@ -49,7 +71,7 @@ def label(row):
     if sku:
         name = f"{name} [{sku}]"
     loc = row.get("location")
-    return f"{name} @ {loc}" if loc else name
+    return f"{name} @ {loc}" if loc and not omit_location else name
 
 
 def active_tracked(rows):
@@ -78,42 +100,46 @@ def build_diff(cur_rows, prev_rows):
     return sold_out, newly_low, restocked
 
 
-def fmt_changes(title, changes):
+def fmt_changes(title, changes, omit_location=False):
     if not changes:
         return []
     lines = [f"*{title}*"]
     for r, before, after in sorted(changes, key=lambda c: c[0]["available"]):
-        lines.append(f"• {label(r)} … {before} → *{after}*")
+        lines.append(f"• {label(r, omit_location)} … {before} → *{after}*")
     lines.append("")
     return lines
 
 
 def build_full(snapshot, rows):
+    only_loc = single_location(rows)
     low = sorted([r for r in rows if r["available"] <= THRESHOLD],
                  key=lambda r: r["available"])
     lines = []
     if low:
-        lines.append(f"*⚠️ 残り{THRESHOLD}個以下（{len(low)}件）*")
+        lines.append(f"*⚠️ 残り{THRESHOLD}以下（{len(low)}件）*")
         for r in low:
             mark = "🔴" if r["available"] <= 0 else "🟡"
-            lines.append(f"{mark} {label(r)} … *{r['available']}*")
+            lines.append(f"{mark} {label(r, bool(only_loc))} … *{r['available']}*")
         lines.append("")
     else:
-        lines.append(f"✅ 残り{THRESHOLD}個以下の商品はありません")
+        lines.append(f"✅ 残り{THRESHOLD}以下はありません")
         lines.append("")
 
-    lines.append(f"*在庫一覧（{len(rows)}件）*")
+    header = f"*一覧（{len(rows)}件）*"
+    if only_loc:
+        header += f"　_{only_loc}_"
+    lines.append(header)
     by_product = {}
     for r in rows:
         by_product.setdefault(r.get("product") or "(商品名なし)", []).append(r)
     for product in sorted(by_product):
         lines.append(f"*{product}*")
-        for r in sorted(by_product[product], key=lambda x: (x.get("variant") or "")):
+        for r in sorted(by_product[product], key=variant_sort_key):
             variant = r.get("variant")
             name = variant if variant and variant != "Default Title" else "—"
-            loc = r.get("location")
-            suffix = f" @ {loc}" if loc else ""
-            lines.append(f"    {name}{suffix} … {r['available']}")
+            suffix = "" if only_loc else (f" @ {r['location']}" if r.get("location") else "")
+            mark = " 🔴" if r["available"] <= 0 else (" 🟡" if r["available"] <= THRESHOLD else "")
+            lines.append(f"    {name}{suffix} … {r['available']}{mark}")
     return lines
 
 
@@ -134,7 +160,8 @@ def main():
     if mode == "auto":
         mode = "full" if now.hour == FULL_HOUR else "diff"
 
-    header = [f"📦 *Shopify 在庫レポート* — {snapshot['store']}",
+    shop = snapshot.get("shop_name") or snapshot["store"]
+    header = [f"📦 *在庫レポート* — {shop}",
               f"_{now.strftime('%Y-%m-%d %H:%M')} JST_", ""]
     body = []
 
@@ -150,9 +177,10 @@ def main():
         if not (sold_out or newly_low or restocked):
             print("NO_POST")
             return 0
-        body += fmt_changes("🔴 売り切れ", sold_out)
-        body += fmt_changes(f"🟡 残り{THRESHOLD}個以下になりました", newly_low)
-        body += fmt_changes("🟢 補充されました", restocked)
+        omit = bool(single_location(rows))
+        body += fmt_changes("🔴 ゼロになりました", sold_out, omit)
+        body += fmt_changes(f"🟡 残り{THRESHOLD}以下になりました", newly_low, omit)
+        body += fmt_changes("🟢 増えました", restocked, omit)
 
     for w in snapshot.get("warnings") or []:
         body.append(f"_⚠️ {w}_")

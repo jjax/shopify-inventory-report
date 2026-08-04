@@ -68,10 +68,34 @@ def main():
         [row(1, "A", "HK", 2), row(2, "B", "HK", 50)]))
     text = "\n".join(lines)
     check("全件に在庫少セクションが出る", "残り" in text and "商品1" in text)
-    check("全件に一覧が出る", "在庫一覧" in text and "商品2" in text)
+    check("全件に一覧が出る", "一覧（" in text and "商品2" in text)
 
     lines_ok = fr.build_full({"store": "x"}, fr.active_tracked([row(2, "B", "HK", 50)]))
     check("在庫少ゼロ件なら✅表示", "✅" in "\n".join(lines_ok))
+
+    # --- 曜日ソート（配送枠運用）---
+    days = ["Delivery on Fri", "Delivery on Mon", "Delivery on Sat",
+            "Delivery on Thu", "Delivery on Tue", "Delivery on Wed"]
+    shuffled = [row(9, d, "HK", 30) for d in days]
+    ordered = [r["variant"] for r in sorted(shuffled, key=fr.variant_sort_key)]
+    check("曜日は Mon→Sat の順に並ぶ",
+          ordered == [f"Delivery on {d}" for d in ["Mon","Tue","Wed","Thu","Fri","Sat"]],
+          f"実際 {ordered}")
+    check("曜日を含まない名前は後ろに回る",
+          fr.variant_sort_key(row(1, "Zzz", "HK", 1))[0] == 1)
+
+    # --- ロケーションのまとめ ---
+    check("拠点が1つなら名前を返す",
+          fr.single_location([row(1, "A", "HK", 1), row(2, "B", "HK", 1)]) == "HK")
+    check("拠点が複数なら None",
+          fr.single_location([row(1, "A", "HK", 1), row(2, "B", "SG", 1)]) is None)
+    one = fr.build_full({"store": "x"}, fr.active_tracked(
+        [row(1, "A", "HK", 30), row(2, "B", "HK", 30)]))
+    check("拠点1つなら各行に拠点名を繰り返さない",
+          "\n".join(one).count("HK") == 1, f"実際 {chr(10).join(one).count('HK')}回")
+    check("拠点が複数なら各行に出す",
+          "SG" in "\n".join(fr.build_full({"store": "x"}, fr.active_tracked(
+              [row(1, "A", "HK", 30), row(2, "B", "SG", 30)]))))
 
     # --- ラベル ---
     plain = row(1, "Default Title", "HK", 1)

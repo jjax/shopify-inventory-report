@@ -247,6 +247,14 @@ query InventorySnapshot($cursor: String) {
 """
 
 
+def fetch_shop_name(sess, cfg):
+    """ストア表示名。取れなくてもレポートは出せるので失敗は握りつぶす。"""
+    try:
+        return (graphql(sess, cfg, "{ shop { name } }") or {}).get("shop", {}).get("name")
+    except ShopifyError:
+        return None
+
+
 def fetch_inventory(sess, cfg, progress=None):
     """全商品・全バリエーション・全ロケーションの在庫を取得して行のリストで返す。
 
