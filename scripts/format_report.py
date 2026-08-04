@@ -24,7 +24,7 @@ PREV = os.path.join(DATA, "snapshot_prev.json")
 MESSAGE = os.path.join(OUT, "slack_message.txt")
 JST = timezone(timedelta(hours=9))
 
-THRESHOLD = int(os.environ.get("SHOPIFY_LOW_STOCK_THRESHOLD", "5"))
+THRESHOLD = int(os.environ.get("SHOPIFY_LOW_STOCK_THRESHOLD", "10"))
 FULL_HOUR = int(os.environ.get("SHOPIFY_FULL_REPORT_HOUR_JST", "9"))
 
 # バリエーション名が曜日を含む場合は曜日順に並べる（配送枠の運用に合わせる）。
@@ -105,7 +105,8 @@ def fmt_changes(title, changes, omit_location=False):
         return []
     lines = [f"*{title}*"]
     for r, before, after in sorted(changes, key=lambda c: c[0]["available"]):
-        lines.append(f"• {label(r, omit_location)} … {before} → *{after}*")
+        shown = "満枠" if after <= 0 else f"{after}枠"
+        lines.append(f"• {label(r, omit_location)} … {before}枠 → *{shown}*")
     lines.append("")
     return lines
 
@@ -116,16 +117,17 @@ def build_full(snapshot, rows):
                  key=lambda r: r["available"])
     lines = []
     if low:
-        lines.append(f"*⚠️ 残り{THRESHOLD}以下（{len(low)}件）*")
+        lines.append(f"*⚠️ 残り{THRESHOLD}枠以下（{len(low)}件）*")
         for r in low:
             mark = "🔴" if r["available"] <= 0 else "🟡"
-            lines.append(f"{mark} {label(r, bool(only_loc))} … *{r['available']}*")
+            qty = "満枠" if r["available"] <= 0 else f"{r['available']}枠"
+            lines.append(f"{mark} {label(r, bool(only_loc))} … *{qty}*")
         lines.append("")
     else:
-        lines.append(f"✅ 残り{THRESHOLD}以下はありません")
+        lines.append(f"✅ 残り{THRESHOLD}枠以下はありません")
         lines.append("")
 
-    header = f"*一覧（{len(rows)}件）*"
+    header = f"*残枠一覧（{len(rows)}件）*"
     if only_loc:
         header += f"　_{only_loc}_"
     lines.append(header)
@@ -139,7 +141,8 @@ def build_full(snapshot, rows):
             name = variant if variant and variant != "Default Title" else "—"
             suffix = "" if only_loc else (f" @ {r['location']}" if r.get("location") else "")
             mark = " 🔴" if r["available"] <= 0 else (" 🟡" if r["available"] <= THRESHOLD else "")
-            lines.append(f"    {name}{suffix} … {r['available']}{mark}")
+            qty = "満枠" if r["available"] <= 0 else f"{r['available']}枠"
+            lines.append(f"    {name}{suffix} … {qty}{mark}")
     return lines
 
 
@@ -161,7 +164,7 @@ def main():
         mode = "full" if now.hour == FULL_HOUR else "diff"
 
     shop = snapshot.get("shop_name") or snapshot["store"]
-    header = [f"📦 *在庫レポート* — {shop}",
+    header = [f"📦 *残枠レポート* — {shop}",
               f"_{now.strftime('%Y-%m-%d %H:%M')} JST_", ""]
     body = []
 
@@ -178,9 +181,9 @@ def main():
             print("NO_POST")
             return 0
         omit = bool(single_location(rows))
-        body += fmt_changes("🔴 ゼロになりました", sold_out, omit)
-        body += fmt_changes(f"🟡 残り{THRESHOLD}以下になりました", newly_low, omit)
-        body += fmt_changes("🟢 増えました", restocked, omit)
+        body += fmt_changes("🔴 満枠になりました", sold_out, omit)
+        body += fmt_changes(f"🟡 残り{THRESHOLD}枠以下になりました", newly_low, omit)
+        body += fmt_changes("🟢 枠が空きました", restocked, omit)
 
     for w in snapshot.get("warnings") or []:
         body.append(f"_⚠️ {w}_")
