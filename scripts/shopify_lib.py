@@ -17,6 +17,13 @@
    verify を無効化するのは禁止（session() 参照）。
 6. tracked=false の inventoryItem は在庫管理対象外。数量は None として扱い、
    「在庫0」と混同しないこと。
+7. 認証は2パターンある。新しい開発ダッシュボード製アプリ（本番の OMAKASE は
+   こちら）は固定の shpat_ トークンを持たず、client_id/client_secret から
+   client credentials grant で短期トークン（有効24h）を都度発行する。
+   POST /admin/oauth/access_token に grant_type=client_credentials。
+   SHOPIFY_ADMIN_TOKEN が設定されていればそちらを優先する。
+8. スコープ不足は HTTP 401 ではなく、HTTP 200 + errors[].extensions.code
+   = ACCESS_DENIED で返る。ステータスコードだけ見ていると成功扱いになる。
 """
 import json
 import os
@@ -26,6 +33,7 @@ import requests
 
 CA_BUNDLE = "/root/.ccr/ca-bundle.crt"
 DEFAULT_API_VERSION = "2026-07"
+REQUIRED_SCOPES = ("read_inventory", "read_products", "read_locations")
 
 # スロットル制御: 残コストがこれを下回ったら回復を待つ
 COST_FLOOR = 200
@@ -36,23 +44,36 @@ class ShopifyError(RuntimeError):
 
 
 def config():
-    """環境変数から設定を読む。トークンはリポジトリにも会話にも置かない。"""
+    """環境変数から設定を読む。認証情報はリポジトリにも会話にも置かない。
+
+    パターンA: SHOPIFY_ADMIN_TOKEN（固定 shpat_ トークン）
+    パターンB: SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET（都度発行）
+    両方あればAを優先する。
+    """
     store = os.environ.get("SHOPIFY_STORE_DOMAIN")
     token = os.environ.get("SHOPIFY_ADMIN_TOKEN")
-    missing = [n for n, v in (("SHOPIFY_STORE_DOMAIN", store),
-                              ("SHOPIFY_ADMIN_TOKEN", token)) if not v]
-    if missing:
+    client_id = os.environ.get("SHOPIFY_CLIENT_ID")
+    client_secret = os.environ.get("SHOPIFY_CLIENT_SECRET")
+
+    if not store:
         raise ShopifyError(
-            "環境変数が未設定: " + ", ".join(missing) + "\n"
-            "Claude Code の環境設定（Environment）の環境変数に登録すること。"
-            "プロンプトやリポジトリに直書きしない。")
+            "環境変数 SHOPIFY_STORE_DOMAIN が未設定（例: xxxx.myshopify.com）。")
+    if not token and not (client_id and client_secret):
+        raise ShopifyError(
+            "認証情報が未設定。次のどちらかを環境変数に登録すること:\n"
+            "  A) SHOPIFY_ADMIN_TOKEN（shpat_ で始まる固定トークン）\n"
+            "  B) SHOPIFY_CLIENT_ID と SHOPIFY_CLIENT_SECRET（都度発行）\n"
+            "Claude Code の環境設定（Environment）に登録する。直書きしない。")
+
     store = store.strip()
     if store.startswith("http"):
         store = store.split("//", 1)[1]
     store = store.rstrip("/")
     return {
         "store": store,
-        "token": token.strip(),
+        "token": token.strip() if token else None,
+        "client_id": client_id.strip() if client_id else None,
+        "client_secret": client_secret.strip() if client_secret else None,
         "version": os.environ.get("SHOPIFY_API_VERSION", DEFAULT_API_VERSION).strip(),
     }
 
@@ -61,10 +82,62 @@ def endpoint(cfg):
     return f"https://{cfg['store']}/admin/api/{cfg['version']}/graphql.json"
 
 
+_TOKEN_CACHE = {}
+
+
+def access_token(cfg):
+    """使用するアクセストークンを返す。
+
+    パターンBでは client credentials grant で短期トークンを発行する。
+    有効期限内はプロセス内でキャッシュして再利用する。
+    """
+    if cfg["token"]:
+        return cfg["token"]
+
+    cached = _TOKEN_CACHE.get(cfg["store"])
+    if cached and cached["expires_at"] > time.time() + 60:
+        return cached["token"]
+
+    url = f"https://{cfg['store']}/admin/oauth/access_token"
+    body = {"client_id": cfg["client_id"], "client_secret": cfg["client_secret"],
+            "grant_type": "client_credentials"}
+    kwargs = {"json": body, "timeout": 60}
+    if os.path.exists(CA_BUNDLE):
+        kwargs["verify"] = CA_BUNDLE
+    try:
+        r = requests.post(url, **kwargs)
+    except requests.RequestException as e:
+        raise ShopifyError(f"トークン発行の通信エラー: {e}")
+
+    if r.status_code != 200:
+        raise ShopifyError(
+            f"トークン発行に失敗 (HTTP {r.status_code}): {r.text[:300]}\n"
+            "SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET を確認すること。")
+    data = r.json()
+    tok = data.get("access_token")
+    if not tok:
+        raise ShopifyError(f"トークン発行の応答に access_token がない: {r.text[:300]}")
+
+    granted = (data.get("scope") or "").split(",")
+    missing = [s for s in REQUIRED_SCOPES if s not in granted]
+    if missing:
+        raise ShopifyError(
+            "アプリのスコープが不足しています: " + ", ".join(missing) + "\n"
+            f"付与済み: {data.get('scope') or '(なし)'}\n"
+            "Shopify 開発ダッシュボードで対象アプリの API アクセススコープに "
+            "上記を追加し、リリース／再インストールしてから再実行すること。")
+
+    _TOKEN_CACHE[cfg["store"]] = {
+        "token": tok,
+        "expires_at": time.time() + int(data.get("expires_in") or 3600),
+    }
+    return tok
+
+
 def session(cfg):
     s = requests.Session()
     s.headers.update({
-        "X-Shopify-Access-Token": cfg["token"],
+        "X-Shopify-Access-Token": access_token(cfg),
         "Content-Type": "application/json",
         "Accept": "application/json",
     })
@@ -122,12 +195,23 @@ def graphql(sess, cfg, query, variables=None, retries=4):
         body = r.json()
         errors = body.get("errors")
         if errors:
+            # errors は認証失敗時に文字列で返ることがある（リスト前提にしない）
+            if isinstance(errors, str):
+                raise ShopifyError(f"API エラー: {errors}")
             codes = {(e.get("extensions") or {}).get("code") for e in errors}
             if "THROTTLED" in codes and attempt < retries:
                 _throttle(body.get("extensions"))
                 time.sleep(delay)
                 delay *= 2
                 continue
+            if "ACCESS_DENIED" in codes:
+                fields = sorted({(e.get("path") or ["?"])[0] for e in errors
+                                 if (e.get("extensions") or {}).get("code") == "ACCESS_DENIED"})
+                raise ShopifyError(
+                    "スコープ不足でアクセスを拒否されました: " + ", ".join(fields) + "\n"
+                    f"必要なスコープ: {', '.join(REQUIRED_SCOPES)}\n"
+                    "Shopify 開発ダッシュボードで対象アプリに追加し、"
+                    "リリース／再インストールしてから再実行すること。")
             raise ShopifyError("GraphQL errors: " + json.dumps(errors, ensure_ascii=False)[:500])
 
         _throttle(body.get("extensions"))

@@ -8,10 +8,21 @@ Claude Code の環境設定（Environment）の環境変数に登録する。
 | 変数 | 必須 | 既定値 | 説明 |
 |---|---|---|---|
 | `SHOPIFY_STORE_DOMAIN` | ✅ | — | `xxxx.myshopify.com`。管理画面のURLではなくmyshopifyドメイン |
-| `SHOPIFY_ADMIN_TOKEN` | ✅ | — | カスタムアプリのアクセストークン（**`shpat_` で始まる**） |
+| `SHOPIFY_CLIENT_ID` | ✅※ | — | 開発ダッシュボードのクライアントID |
+| `SHOPIFY_CLIENT_SECRET` | ✅※ | — | クライアントシークレット（`shpss_`） |
+| `SHOPIFY_ADMIN_TOKEN` | ※ | — | 固定アクセストークン（`shpat_`）。あればこちらを優先 |
 | `SHOPIFY_API_VERSION` | | `2026-07` | 400が出たら1つ前の四半期版に下げる |
 | `SHOPIFY_LOW_STOCK_THRESHOLD` | | `5` | この数以下を「在庫少」と判定 |
 | `SHOPIFY_FULL_REPORT_HOUR_JST` | | `9` | auto モードで全件を出す時刻（JST） |
+
+※ 認証は次のどちらか一方でよい。**本番（OMAKASE）はパターンB。**
+
+- **パターンA**: `SHOPIFY_ADMIN_TOKEN` … 旧来のカスタムアプリ。固定 `shpat_` トークン
+- **パターンB**: `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` … 新しい開発
+  ダッシュボード製アプリ。固定トークンは存在せず、実行時に
+  `POST /admin/oauth/access_token`（`grant_type=client_credentials`）で
+  有効24時間の短期トークンを都度発行する。スクリプトが自動でやるので
+  手動作業は不要。
 
 ### トークンの発行手順
 Shopify管理画面 → 設定 → アプリと販売チャネル → アプリ開発 → アプリを作成
@@ -72,8 +83,11 @@ python3 scripts/format_report.py       # 標準出力に POST / NO_POST
 
 | 症状 | 原因と対処 |
 |---|---|
-| `Invalid API key or access token` (401) | **まずトークンの接頭辞を見る。`shpss_` ならAPIシークレットキーを入れてしまっている**（別物）。正しいのは `shpat_` |
-| `認証失敗 (HTTP 401/403)` | トークンが誤り、または期限切れ／スコープ不足。3つのスコープを確認 |
+| `アプリのスコープが不足しています` | アプリに `read_inventory` / `read_products` / `read_locations` が付いていない。開発ダッシュボードで追加し、**リリース／再インストールが必要**（設定変更だけでは反映されない） |
+| `スコープ不足でアクセスを拒否されました` | 同上。トークン発行時のscopeには出ないが個別フィールドで拒否されるケース |
+| `トークン発行に失敗` | `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` の誤り |
+| `Invalid API key or access token` (401) | `SHOPIFY_ADMIN_TOKEN` に `shpss_`（シークレットキー）を入れている。パターンBならこの変数は消して CLIENT_ID/SECRET を使う |
+| `認証失敗 (HTTP 401/403)` | トークンが誤り、または期限切れ／スコープ不足 |
 | `エンドポイントが見つかりません` | ドメインが `xxxx.myshopify.com` 形式か確認。APIバージョンも確認 |
 | `GraphQL errors` に `available` | APIバージョンが古い。`SHOPIFY_API_VERSION` を上げる |
 | 400 で `doesn't exist on type` | 逆にバージョンが新しすぎる。1四半期下げる |

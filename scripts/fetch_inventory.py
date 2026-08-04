@@ -28,7 +28,13 @@ def main():
         print(f"[設定エラー] {e}", file=sys.stderr)
         return 2
 
-    sess = sl.session(cfg)
+    # session() の中でトークン発行とスコープ検証が走るため、ここも捕捉する
+    try:
+        sess = sl.session(cfg)
+    except sl.ShopifyError as e:
+        print(f"[認証エラー] {e}", file=sys.stderr)
+        return 2
+
     print(f"取得開始: {cfg['store']} (API {cfg['version']})")
 
     def progress(pages, rows):

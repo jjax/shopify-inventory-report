@@ -15,7 +15,9 @@ python3 scripts/verify.py               # スクリプト変更時は必須
 
 - レポートは日本語。時刻表記は JST。
 - 認証情報は**すべて環境変数**。リポジトリにもプロンプトにも書かない。
-  必須: `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_ADMIN_TOKEN`
+  必須: `SHOPIFY_STORE_DOMAIN` と、`SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET`
+  （本番の OMAKASE はこちら。実行時に短期トークンを自動発行する）。
+  固定トークンがある場合は `SHOPIFY_ADMIN_TOKEN` でも可。
 - `data/snapshot*.json` と `output/slack_message.txt` は .gitignore 済み
   （在庫データはコミットしない）。
 - Slack 投稿は Slack コネクタ経由。`format_report.py` が `POST` を出力した

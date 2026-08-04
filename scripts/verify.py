@@ -95,6 +95,43 @@ def main():
     check("外側ページネーションがある", "hasNextPage" in sl.VARIANTS_QUERY)
     check("トークンをコードに埋めていない", "shpat_" not in sl.VARIANTS_QUERY)
 
+    # --- 認証設定の解決（API は叩かない） ---
+    base = {k: v for k, v in os.environ.items() if not k.startswith("SHOPIFY_")}
+    def cfg_with(**env):
+        saved = dict(os.environ)
+        os.environ.clear(); os.environ.update(base); os.environ.update(env)
+        try:
+            return sl.config()
+        finally:
+            os.environ.clear(); os.environ.update(saved)
+
+    c = cfg_with(SHOPIFY_STORE_DOMAIN="x.myshopify.com", SHOPIFY_ADMIN_TOKEN="shpat_dummy")
+    check("パターンA: 固定トークンを読む", c["token"] == "shpat_dummy")
+
+    c = cfg_with(SHOPIFY_STORE_DOMAIN="x.myshopify.com",
+                 SHOPIFY_CLIENT_ID="cid", SHOPIFY_CLIENT_SECRET="shpss_dummy")
+    check("パターンB: client 資格情報を読む",
+          c["token"] is None and c["client_id"] == "cid")
+
+    c = cfg_with(SHOPIFY_STORE_DOMAIN="https://x.myshopify.com/",
+                 SHOPIFY_ADMIN_TOKEN="shpat_dummy")
+    check("ドメインのURL形式を正規化", c["store"] == "x.myshopify.com")
+
+    try:
+        cfg_with(SHOPIFY_STORE_DOMAIN="x.myshopify.com")
+        check("認証情報なしはエラー", False, "例外が出なかった")
+    except sl.ShopifyError:
+        check("認証情報なしはエラー", True)
+
+    try:
+        cfg_with(SHOPIFY_ADMIN_TOKEN="shpat_dummy")
+        check("ドメインなしはエラー", False, "例外が出なかった")
+    except sl.ShopifyError:
+        check("ドメインなしはエラー", True)
+
+    check("必要スコープを3つ定義している",
+          set(sl.REQUIRED_SCOPES) == {"read_inventory", "read_products", "read_locations"})
+
     print()
     if FAILS:
         print(f"NG {len(FAILS)} 件: " + ", ".join(FAILS))
