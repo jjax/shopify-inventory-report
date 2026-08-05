@@ -2,13 +2,19 @@
 # -*- coding: utf-8 -*-
 """スナップショットから Slack 投稿用テキストを組み立てる。
 
+差分の基準は「直前の実行」ではなく「その日の朝9時のベースライン」。
+毎時のスナップショットを永続化せずに済ませるための設計。
+
 モード:
-  auto (既定) … FULL_REPORT_HOUR_JST の回だけ全件、それ以外は差分のみ
-  full        … 常に全件＋在庫少強調
-  diff        … 常に差分のみ
+  auto (既定) … FULL_REPORT_HOUR_JST の回は full、それ以外は diff
+  full        … 全件＋残枠少強調。同時にベースラインを更新し通知済み記録を消す
+  diff        … ベースラインと比較し、今日まだ通知していない変化だけを出す
 
 投稿すべき内容があれば output/slack_message.txt に書き出して "POST" を出力。
-投稿不要（差分なし）なら "NO_POST" を出力し、ファイルは作らない。
+投稿不要なら "NO_POST" を出力し、ファイルは作らない。
+
+重要: 通知済み記録(alerted.json)は「投稿が成功したら」コミットすること。
+投稿に失敗した回をコミットすると、その警告が二度と出なくなる。
 """
 import argparse
 import json
@@ -20,7 +26,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 OUT = os.path.join(ROOT, "output")
 SNAPSHOT = os.path.join(DATA, "snapshot.json")
-PREV = os.path.join(DATA, "snapshot_prev.json")
+BASELINE = os.path.join(DATA, "baseline.json")
+ALERTED = os.path.join(DATA, "alerted.json")
 MESSAGE = os.path.join(OUT, "slack_message.txt")
 JST = timezone(timedelta(hours=9))
 
@@ -30,6 +37,25 @@ FULL_HOUR = int(os.environ.get("SHOPIFY_FULL_REPORT_HOUR_JST", "9"))
 # バリエーション名が曜日を含む場合は曜日順に並べる（配送枠の運用に合わせる）。
 # アルファベット順だと Fri, Mon, Sat… となって読めないため。
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+SOLD_OUT, LOW, FREED = "満枠", "残少", "空き"
+
+
+def load(path):
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save(path, obj):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=1)
+
+
+def key(row):
+    return f"{row.get('variant_id')}|{row.get('location')}"
 
 
 def variant_sort_key(row):
@@ -44,17 +70,6 @@ def single_location(rows):
     """ロケーションが1種類だけならその名前を返す。複数なら None。"""
     locs = {r.get("location") for r in rows if r.get("location")}
     return locs.pop() if len(locs) == 1 else None
-
-
-def load(path):
-    if not os.path.exists(path):
-        return None
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def key(row):
-    return (row.get("variant_id"), row.get("location"))
 
 
 def label(row, omit_location=False):
@@ -81,37 +96,54 @@ def active_tracked(rows):
             and (r.get("status") or "ACTIVE").upper() == "ACTIVE"]
 
 
-def build_diff(cur_rows, prev_rows):
-    prev = {key(r): r for r in prev_rows}
-    sold_out, newly_low, restocked = [], [], []
+def qty(n):
+    return "満枠" if n <= 0 else f"{n}枠"
+
+
+def build_alerts(cur_rows, base_rows):
+    """ベースラインと比べて状態が変わった項目を返す。
+
+    各要素: (category, row, before, after)
+    同じ項目でも category が違えば別の通知として扱う
+    （残少になった後に満枠になったら、両方通知したいため）。
+    """
+    base = {key(r): r for r in base_rows}
+    alerts = []
     for r in cur_rows:
-        p = prev.get(key(r))
-        if p is None or p.get("available") is None:
+        b = base.get(key(r))
+        if b is None or b.get("available") is None:
             continue
-        before, after = p["available"], r["available"]
-        if before == after:
-            continue
+        before, after = b["available"], r["available"]
         if after <= 0 < before:
-            sold_out.append((r, before, after))
+            alerts.append((SOLD_OUT, r, before, after))
         elif after <= THRESHOLD < before:
-            newly_low.append((r, before, after))
+            alerts.append((LOW, r, before, after))
         elif before <= THRESHOLD < after:
-            restocked.append((r, before, after))
-    return sold_out, newly_low, restocked
+            alerts.append((FREED, r, before, after))
+    return alerts
 
 
-def fmt_changes(title, changes, omit_location=False):
-    if not changes:
-        return []
-    lines = [f"*{title}*"]
-    for r, before, after in sorted(changes, key=lambda c: c[0]["available"]):
-        shown = "満枠" if after <= 0 else f"{after}枠"
-        lines.append(f"• {label(r, omit_location)} … {before}枠 → *{shown}*")
-    lines.append("")
+TITLES = {
+    SOLD_OUT: "🔴 満枠になりました",
+    LOW: f"🟡 残り{THRESHOLD}枠以下になりました",
+    FREED: "🟢 枠が空きました",
+}
+
+
+def fmt_alerts(alerts, omit_location):
+    lines = []
+    for cat in (SOLD_OUT, LOW, FREED):
+        group = [a for a in alerts if a[0] == cat]
+        if not group:
+            continue
+        lines.append(f"*{TITLES[cat]}*")
+        for _, r, before, after in sorted(group, key=lambda a: a[3]):
+            lines.append(f"• {label(r, omit_location)} … {qty(before)} → *{qty(after)}*")
+        lines.append("")
     return lines
 
 
-def build_full(snapshot, rows):
+def build_full(rows):
     only_loc = single_location(rows)
     low = sorted([r for r in rows if r["available"] <= THRESHOLD],
                  key=lambda r: r["available"])
@@ -120,8 +152,7 @@ def build_full(snapshot, rows):
         lines.append(f"*⚠️ 残り{THRESHOLD}枠以下（{len(low)}件）*")
         for r in low:
             mark = "🔴" if r["available"] <= 0 else "🟡"
-            qty = "満枠" if r["available"] <= 0 else f"{r['available']}枠"
-            lines.append(f"{mark} {label(r, bool(only_loc))} … *{qty}*")
+            lines.append(f"{mark} {label(r, bool(only_loc))} … *{qty(r['available'])}*")
         lines.append("")
     else:
         lines.append(f"✅ 残り{THRESHOLD}枠以下はありません")
@@ -141,8 +172,7 @@ def build_full(snapshot, rows):
             name = variant if variant and variant != "Default Title" else "—"
             suffix = "" if only_loc else (f" @ {r['location']}" if r.get("location") else "")
             mark = " 🔴" if r["available"] <= 0 else (" 🟡" if r["available"] <= THRESHOLD else "")
-            qty = "満枠" if r["available"] <= 0 else f"{r['available']}枠"
-            lines.append(f"    {name}{suffix} … {qty}{mark}")
+            lines.append(f"    {name}{suffix} … {qty(r['available'])}{mark}")
     return lines
 
 
@@ -159,6 +189,7 @@ def main():
 
     rows = active_tracked(snapshot["rows"])
     now = datetime.now(JST)
+    today = now.strftime("%Y-%m-%d")
     mode = args.mode
     if mode == "auto":
         mode = "full" if now.hour == FULL_HOUR else "diff"
@@ -166,24 +197,41 @@ def main():
     shop = snapshot.get("shop_name") or snapshot["store"]
     header = [f"📦 *残枠レポート* — {shop}",
               f"_{now.strftime('%Y-%m-%d %H:%M')} JST_", ""]
-    body = []
 
     if mode == "full":
-        body = build_full(snapshot, rows)
+        # 今日のベースラインを張り替え、通知済み記録を白紙に戻す
+        save(BASELINE, snapshot)
+        save(ALERTED, {"date": today, "keys": []})
+        body = build_full(rows)
+        print(f"[情報] ベースラインを更新（{len(rows)}行）", file=sys.stderr)
     else:
-        prev = load(PREV)
-        if not prev:
+        baseline = load(BASELINE)
+        if not baseline:
             print("NO_POST")
-            print("[情報] 前回スナップショットがないため差分なし。", file=sys.stderr)
+            print(f"[情報] ベースライン未作成。朝{FULL_HOUR}時の全件実行を待つこと。",
+                  file=sys.stderr)
             return 0
-        sold_out, newly_low, restocked = build_diff(rows, active_tracked(prev["rows"]))
-        if not (sold_out or newly_low or restocked):
+
+        state = load(ALERTED) or {}
+        if state.get("date") != today:
+            state = {"date": today, "keys": []}
+        seen = set(state["keys"])
+
+        alerts = build_alerts(rows, active_tracked(baseline["rows"]))
+        fresh = [a for a in alerts if f"{a[0]}|{key(a[1])}" not in seen]
+        if not fresh:
             print("NO_POST")
+            if alerts:
+                print(f"[情報] {len(alerts)}件の変化はすべて通知済み。", file=sys.stderr)
             return 0
-        omit = bool(single_location(rows))
-        body += fmt_changes("🔴 満枠になりました", sold_out, omit)
-        body += fmt_changes(f"🟡 残り{THRESHOLD}枠以下になりました", newly_low, omit)
-        body += fmt_changes("🟢 枠が空きました", restocked, omit)
+
+        seen.update(f"{a[0]}|{key(a[1])}" for a in fresh)
+        save(ALERTED, {"date": today, "keys": sorted(seen)})
+
+        base_time = (baseline.get("fetched_at") or "")[11:16]
+        header[1] = f"_{now.strftime('%Y-%m-%d %H:%M')} JST — 本日{base_time}時点との比較_"
+        body = fmt_alerts(fresh, bool(single_location(rows)))
+        print(f"[情報] 新規{len(fresh)}件 / 変化{len(alerts)}件", file=sys.stderr)
 
     for w in snapshot.get("warnings") or []:
         body.append(f"_⚠️ {w}_")

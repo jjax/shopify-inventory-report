@@ -18,7 +18,11 @@ python3 scripts/verify.py               # スクリプト変更時は必須
   必須: `SHOPIFY_STORE_DOMAIN` と、`SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET`
   （本番の OMAKASE はこちら。実行時に短期トークンを自動発行する）。
   固定トークンがある場合は `SHOPIFY_ADMIN_TOKEN` でも可。
-- `data/snapshot*.json` と `output/slack_message.txt` は .gitignore 済み
-  （在庫データはコミットしない）。
+- 差分の基準は「直前の実行」ではなく「その日の朝9時のベースライン」。
+  `data/baseline.json`（基準）と `data/alerted.json`（通知済み記録）は
+  **コミットして永続化する**。`data/snapshot.json` は作業ファイルなので
+  .gitignore 済み。
 - Slack 投稿は Slack コネクタ経由。`format_report.py` が `POST` を出力した
   ときだけ投稿し、`NO_POST` のときは何もしない。
+- **投稿が成功した回だけコミットすること。** 失敗した回をコミットすると
+  その警告が「通知済み」扱いになり二度と出ない。

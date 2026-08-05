@@ -1,0 +1,81 @@
+{
+ "fetched_at": "2026-08-05T12:30:37.430962+09:00",
+ "store": "kxh8kd-dr.myshopify.com",
+ "shop_name": "OMAKASE",
+ "api_version": "2026-07",
+ "warnings": [],
+ "rows": [
+  {
+   "product_id": "gid://shopify/Product/15077998068084",
+   "product": "Family Plan",
+   "status": "ACTIVE",
+   "variant_id": "gid://shopify/ProductVariant/54659466756468",
+   "variant": "Delivery on Mon",
+   "sku": "",
+   "display_name": "Family Plan - Delivery on Mon",
+   "location": "Tak Moon Holdings Limited",
+   "available": 26,
+   "tracked": true
+  },
+  {
+   "product_id": "gid://shopify/Product/15077998068084",
+   "product": "Family Plan",
+   "status": "ACTIVE",
+   "variant_id": "gid://shopify/ProductVariant/54659466789236",
+   "variant": "Delivery on Tue",
+   "sku": "",
+   "display_name": "Family Plan - Delivery on Tue",
+   "location": "Tak Moon Holdings Limited",
+   "available": 30,
+   "tracked": true
+  },
+  {
+   "product_id": "gid://shopify/Product/15077998068084",
+   "product": "Family Plan",
+   "status": "ACTIVE",
+   "variant_id": "gid://shopify/ProductVariant/54659466822004",
+   "variant": "Delivery on Wed",
+   "sku": "",
+   "display_name": "Family Plan - Delivery on Wed",
+   "location": "Tak Moon Holdings Limited",
+   "available": 30,
+   "tracked": true
+  },
+  {
+   "product_id": "gid://shopify/Product/15077998068084",
+   "product": "Family Plan",
+   "status": "ACTIVE",
+   "variant_id": "gid://shopify/ProductVariant/54659466887540",
+   "variant": "Delivery on Thu",
+   "sku": "",
+   "display_name": "Family Plan - Delivery on Thu",
+   "location": "Tak Moon Holdings Limited",
+   "available": 30,
+   "tracked": true
+  },
+  {
+   "product_id": "gid://shopify/Product/15077998068084",
+   "product": "Family Plan",
+   "status": "ACTIVE",
+   "variant_id": "gid://shopify/ProductVariant/54659466920308",
+   "variant": "Delivery on Fri",
+   "sku": "",
+   "display_name": "Family Plan - Delivery on Fri",
+   "location": "Tak Moon Holdings Limited",
+   "available": 30,
+   "tracked": true
+  },
+  {
+   "product_id": "gid://shopify/Product/15077998068084",
+   "product": "Family Plan",
+   "status": "ACTIVE",
+   "variant_id": "gid://shopify/ProductVariant/54659466953076",
+   "variant": "Delivery on Sat",
+   "sku": "",
+   "display_name": "Family Plan - Delivery on Sat",
+   "location": "Tak Moon Holdings Limited",
+   "available": 29,
+   "tracked": true
+  }
+ ]
+}
