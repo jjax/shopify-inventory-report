@@ -26,9 +26,14 @@ OMAKASE の残枠レポートを実行して。
    - 標準出力が `POST` なら次へ。
 
 【2. Slack 投稿】
-`output/slack_message.txt` の中身を **一字一句そのまま** 投稿する。
-要約・省略・言い換えはしない（数字が変わると意味がないため）。
-投稿先: #project_goabroad_hk_shopify （ID: C0B5A8DMQTS）
+まず `python3 scripts/post_slack.py` を実行する。終了コードで分岐する:
+- `0` … Webhook で投稿成功。次へ進む。
+- `3` … `SLACK_WEBHOOK_URL` 未設定。Slack コネクタを使い、
+  `output/slack_message.txt` の中身を **一字一句そのまま** 投稿する。
+  投稿先: #project_goabroad_hk_shopify （ID: C0B5A8DMQTS）
+- `1` / `2` … 投稿失敗。原因を明記して終了する。**コミットしないこと。**
+
+いずれの経路でも、要約・省略・言い換えはしない（数字が変わると意味がないため）。
 
 【3. 状態の永続化（投稿が成功した場合のみ）】
 Slack への投稿が成功したことを確認してから、次を実行する:

@@ -1,4 +1,4 @@
-# RUNBOOK — Shopify 在庫レポート
+# RUNBOOK — OMAKASE 残枠レポート
 
 ## 1. 環境変数
 
@@ -12,8 +12,9 @@ Claude Code の環境設定（Environment）の環境変数に登録する。
 | `SHOPIFY_CLIENT_SECRET` | ✅※ | — | クライアントシークレット（`shpss_`） |
 | `SHOPIFY_ADMIN_TOKEN` | ※ | — | 固定アクセストークン（`shpat_`）。あればこちらを優先 |
 | `SHOPIFY_API_VERSION` | | `2026-07` | 400が出たら1つ前の四半期版に下げる |
-| `SHOPIFY_LOW_STOCK_THRESHOLD` | | `5` | この数以下を「在庫少」と判定 |
+| `SHOPIFY_LOW_STOCK_THRESHOLD` | | `10` | この数以下を「残枠少」と判定 |
 | `SHOPIFY_FULL_REPORT_HOUR_JST` | | `9` | auto モードで全件を出す時刻（JST） |
+| `SLACK_WEBHOOK_URL` | | — | 設定すると `post_slack.py` が直接投稿する。未設定ならコネクタ経由 |
 
 ※ 認証は次のどちらか一方でよい。**本番（OMAKASE）はパターンB。**
 
@@ -39,12 +40,22 @@ Shopify管理画面 → 設定 → アプリと販売チャネル → アプリ�
 
 ```bash
 pip3 install -r requirements.txt
-python3 scripts/fetch_inventory.py     # data/snapshot.json を更新（前回は snapshot_prev.json へ退避）
+python3 scripts/fetch_inventory.py     # data/snapshot.json を更新
 python3 scripts/format_report.py       # 標準出力に POST / NO_POST
 ```
 
-`format_report.py` が `POST` を出したら `output/slack_message.txt` の中身を
-そのまま Slack に投稿する。`NO_POST` のときは投稿しない（差分なし）。
+`format_report.py` が `POST` を出したら `python3 scripts/post_slack.py` で投稿する。
+`NO_POST` のときは投稿しない（変化なし）。
+
+`post_slack.py` の終了コード: `0`=成功 / `1`=失敗 / `2`=本文なし /
+`3`=`SLACK_WEBHOOK_URL` 未設定（Slack コネクタ経由で投稿すること）。
+
+### 投稿経路が2つある理由
+
+エージェントが作成した Routine には Slack コネクタを引き継げない
+（`connectors` パラメータが組織で無効）。そのためスクリプトから直接
+投稿できる Webhook 経路を用意している。claude.ai の Routine 画面から
+作成した Routine はコネクタを持つため、そちらはコネクタ経由でよい。
 
 ## 3. 投稿ポリシー
 
