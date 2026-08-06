@@ -123,6 +123,8 @@ python3 scripts/format_report.py       # 標準出力に POST / NO_POST
 | 400 で `doesn't exist on type` | 逆にバージョンが新しすぎる。1四半期下げる |
 | 0行しか取れない | `read_products` スコープ不足が最有力 |
 | ロケーション50超の警告 | `shopify_lib.py` の `inventoryLevels(first: 50)` を増やす |
+| Slack には届くが `state:` コミットが増えない | **Routine のソースリポジトリが未設定**。`git clone https://github.com/...` で取得したクローンは読み取り専用で push できない。Routine 設定のソースに `jjax/shopify-inventory-report` を指定すると push 権限つきでクローンされる |
+| 同じ警告が毎時繰り返される | 上と同じ原因。`alerted.json` が push できず引き継がれていない |
 
 ## 7. スクリプト変更時
 

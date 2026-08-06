@@ -4,6 +4,12 @@
 - 環境変数に `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`
   が登録されていること。
 - スケジュール: 毎時（Routine の最小間隔が1時間のため、これが上限の細かさ）。
+- **Routine のソースリポジトリに `jjax/shopify-inventory-report` を設定すること。**
+  これが最重要。設定するとコンテナ起動時に push 権限つきでクローンされる。
+  未設定だとプロンプト内の `git clone https://github.com/...` で取得することになり、
+  それは**読み取り専用**なので `git push` が失敗し、ベースラインと通知済み記録が
+  永続化されない。結果、差分の基準が古いまま固定され、同じ警告が毎時繰り返される。
+  2026-08-06 に実際にこれで失敗した（Slack 投稿は成功、push だけ無言で失敗）。
 
 ---
 

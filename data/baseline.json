@@ -1,5 +1,5 @@
 {
- "fetched_at": "2026-08-05T12:30:37.430962+09:00",
+ "fetched_at": "2026-08-06T09:39:00+09:00",
  "store": "kxh8kd-dr.myshopify.com",
  "shop_name": "OMAKASE",
  "api_version": "2026-07",
@@ -14,7 +14,7 @@
    "sku": "",
    "display_name": "Family Plan - Delivery on Mon",
    "location": "Tak Moon Holdings Limited",
-   "available": 26,
+   "available": 25,
    "tracked": true
   },
   {
@@ -38,7 +38,7 @@
    "sku": "",
    "display_name": "Family Plan - Delivery on Wed",
    "location": "Tak Moon Holdings Limited",
-   "available": 30,
+   "available": 29,
    "tracked": true
   },
   {
