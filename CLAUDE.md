@@ -10,6 +10,7 @@ API仕様・環境変数・投稿ポリシー・トラブルシュートがす�
 pip3 install -r requirements.txt        # 初回のみ
 python3 scripts/fetch_inventory.py      # 在庫取得 -> data/snapshot.json
 python3 scripts/format_report.py        # Slack本文生成 -> output/slack_message.txt
+python3 scripts/commit_state.py         # 投稿成功後の状態永続化（生のgit pushは使わない）
 python3 scripts/verify.py               # スクリプト変更時は必須
 ```
 
@@ -26,3 +27,6 @@ python3 scripts/verify.py               # スクリプト変更時は必須
   ときだけ投稿し、`NO_POST` のときは何もしない。
 - **投稿が成功した回だけコミットすること。** 失敗した回をコミットすると
   その警告が「通知済み」扱いになり二度と出ない。
+- 永続化は必ず `scripts/commit_state.py` を使う。このリポジトリは public な
+  ので認証情報が無くても read は通り、**`git push` だけが静かに失敗する**。
+  非ゼロ終了なら状態は残っていないので、必ず実行結果に明記すること。

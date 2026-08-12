@@ -10,6 +10,11 @@
   それは**読み取り専用**なので `git push` が失敗し、ベースラインと通知済み記録が
   永続化されない。結果、差分の基準が古いまま固定され、同じ警告が毎時繰り返される。
   2026-08-06 に実際にこれで失敗した（Slack 投稿は成功、push だけ無言で失敗）。
+- **ソースを設定してもなお push できないことがある。** 2026-08-12 がそれで、
+  クローンに credential.helper も http.extraheader も無く、`remote.origin.url`
+  が素の HTTPS だった。public なので read は通り、write だけ落ちる。
+  `scripts/commit_state.py` が `GITHUB_TOKEN` / `GH_TOKEN` を credential helper
+  経由で渡してこれを吸収する。だから **状態の永続化は必ずこのスクリプトで行う**。
 
 ---
 
@@ -45,15 +50,20 @@ OMAKASE の残枠レポートを実行して。
 Slack への投稿が成功したことを確認してから、次を実行する:
 
 ```
-git add data/baseline.json data/alerted.json
-git commit -m "state: <YYYY-MM-DD HH:MM> JST"
-git push -u origin main
+python3 scripts/commit_state.py
 ```
 
-- ネットワークエラー時は 2s/4s/8s/16s で最大4回リトライする。
+終了コードで分岐する:
+- `0` … push 成功、または変化が無くコミット不要だった。正常終了。
+- `1` / `2` … **状態は永続化されていない。** 標準エラーの内容をそのまま添えて
+  通知に含める（次回の差分基準がずれるため）。
+
+- 生の `git commit` / `git push` を直接叩かないこと。このリポジトリは public な
+  ので認証情報が無くても read は通り、**push だけが静かに失敗する**。
+  `commit_state.py` は認証を明示的に用意し、push 後にリモートの ref を読み直して
+  反映を確認し、ネットワーク失敗時は 2s/4s/8s/16s でリトライする。
 - **投稿に失敗した回はコミットしない。** コミットしてしまうと、その警告が
   「通知済み」として記録され、二度と通知されなくなる。
-- push できなかった場合はその旨を通知に含める（次回の差分基準がずれるため）。
 - 差分がなく `NO_POST` だった回は、コミットするものが無いので何もしない。
 
 【動作の要点】

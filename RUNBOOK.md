@@ -50,6 +50,16 @@ python3 scripts/format_report.py       # 標準出力に POST / NO_POST
 `post_slack.py` の終了コード: `0`=成功 / `1`=失敗 / `2`=本文なし /
 `3`=`SLACK_WEBHOOK_URL` 未設定（Slack コネクタ経由で投稿すること）。
 
+**投稿に成功したら** `python3 scripts/commit_state.py` で状態を永続化する。
+生の `git commit` / `git push` を直接叩かないこと（後述の理由で静かに失敗する）。
+
+```bash
+python3 scripts/commit_state.py      # data/baseline.json と data/alerted.json を push
+```
+
+終了コード: `0`=push 成功または変化なし / `1`=commit・push 失敗 / `2`=トークン未設定。
+**非ゼロなら状態は残っていない。** 次回の差分基準がずれるので、必ず通知に含めること。
+
 ### 投稿経路が2つある理由
 
 エージェントが作成した Routine には Slack コネクタを引き継げない
@@ -90,6 +100,13 @@ python3 scripts/format_report.py       # 標準出力に POST / NO_POST
 その警告が「通知済み」になって二度と出なくなる。
 `data/snapshot.json` は毎回の作業ファイルなのでコミットしない（.gitignore 済み）。
 
+> ⚠️ **push は静かに失敗する。** このリポジトリは public なので、認証情報が
+> 無くても `clone` / `fetch` / `ls-remote` は普通に通る。そのため「読めている
+> から書けるはず」と思い込みやすいが、`git push` だけが落ちる。しかも Slack
+> 投稿はその前に終わっているので、**レポートは届いたのに状態だけ消える**。
+> `commit_state.py` は push 後にリモートの ref を読み直して反映を確認し、
+> 少しでも怪しければ非ゼロで終了する。この確認を飛ばさないこと。
+
 ## 4. 集計の定義
 
 - 対象は **tracked=true かつ product.status=ACTIVE** の行のみ。
@@ -123,8 +140,11 @@ python3 scripts/format_report.py       # 標準出力に POST / NO_POST
 | 400 で `doesn't exist on type` | 逆にバージョンが新しすぎる。1四半期下げる |
 | 0行しか取れない | `read_products` スコープ不足が最有力 |
 | ロケーション50超の警告 | `shopify_lib.py` の `inventoryLevels(first: 50)` を増やす |
-| Slack には届くが `state:` コミットが増えない | **Routine のソースリポジトリが未設定**。`git clone https://github.com/...` で取得したクローンは読み取り専用で push できない。Routine 設定のソースに `jjax/shopify-inventory-report` を指定すると push 権限つきでクローンされる |
+| Slack には届くが `state:` コミットが増えない | push が失敗している。原因は2通りあるので下の2行を順に見る。まず `python3 scripts/commit_state.py` を単体で回すと、どちらなのか終了コードと標準エラーで分かる |
+| ↑ 原因A: クローンに push 用の認証手段が無い | **2026-08-12 の原因はこれ。** `git config --get credential.helper` と `git config --get-regexp 'http.*extraheader'` がどちらも空で、`remote.origin.url` が素の HTTPS だと、read は public なので通るが write だけ落ちる。`GITHUB_TOKEN` / `GH_TOKEN` は環境変数にあるので、`commit_state.py` がそれを credential helper 経由で渡して解決する |
+| ↑ 原因B: Routine のソースリポジトリが未設定 | **2026-08-06 の原因はこれ。** Routine 設定のソースに `jjax/shopify-inventory-report` を指定すると push 権限つきでクローンされる |
 | 同じ警告が毎時繰り返される | 上と同じ原因。`alerted.json` が push できず引き継がれていない |
+| ベースラインが前日のまま止まっている | 朝9時の full 実行が push に失敗した。Slack に残っている当日9時台の全件レポートが実測値の記録になるので、そこから `data/baseline.json` を復元し、`data/alerted.json` を `{"date": "当日", "keys": []}` に戻す（実例: 2026-08-12 の復旧コミット） |
 
 ## 7. スクリプト変更時
 

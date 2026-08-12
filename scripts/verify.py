@@ -149,6 +149,68 @@ def main():
         with open(os.path.join(data, "alerted.json"), encoding="utf-8") as f:
             check("記録が白紙に戻る", json.load(f)["keys"] == [])
 
+    # --- 状態の永続化（実際に git を回す。ローカルのベアリポジトリを相手にする）---
+    with tempfile.TemporaryDirectory() as td:
+        bare = os.path.join(td, "remote.git")
+        work = os.path.join(td, "work")
+        for a in (["init", "--bare", "-b", "main", bare], ["init", "-b", "main", work]):
+            subprocess.run(["git"] + a, capture_output=True)
+        os.makedirs(os.path.join(work, "data"))
+
+        def g(*a):
+            return subprocess.run(["git", "-C", work] + list(a), capture_output=True, text=True)
+
+        def state(name, text):
+            with open(os.path.join(work, "data", name), "w", encoding="utf-8") as f:
+                f.write(text)
+
+        def run_state(*extra, env=None):
+            return subprocess.run(
+                [sys.executable, os.path.join(SCRIPTS, "commit_state.py"), "--repo", work] + list(extra),
+                capture_output=True, text=True,
+                env=dict(env or os.environ, COMMIT_STATE_FAST="1"))
+
+        g("config", "user.email", "t@example.com")
+        g("config", "user.name", "t")
+        g("remote", "add", "origin", bare)
+        state("baseline.json", "{}")
+        state("alerted.json", "{}")
+        g("add", "-A")
+        g("commit", "-m", "init")
+        g("push", "origin", "main")
+
+        r = run_state()
+        check("状態に変化が無ければコミットしない",
+              r.returncode == 0 and "NOTHING" in r.stdout, f"実際 rc={r.returncode} {r.stdout!r}")
+
+        state("baseline.json", '{"a": 1}')
+        r = run_state("--message", "state: テスト")
+        check("状態が変わったら push する",
+              r.returncode == 0 and "PUSHED" in r.stdout, f"実際 rc={r.returncode} {r.stderr!r}")
+        pushed = subprocess.run(["git", "ls-remote", bare, "refs/heads/main"],
+                                capture_output=True, text=True).stdout.split()
+        check("リモートに実際に反映される",
+              bool(pushed) and pushed[0] == g("rev-parse", "HEAD").stdout.strip())
+
+        # push 先を壊す。ここで 0 を返してしまうと、投稿済みなのに状態が
+        # 消えたことに誰も気づけない（2026-08-06 / 08-12 の事故がこれ）。
+        g("remote", "set-url", "origin", os.path.join(td, "存在しない.git"))
+        state("baseline.json", '{"a": 2}')
+        r = run_state("--message", "state: 壊れた宛先")
+        check("push できなければ非ゼロで終了する", r.returncode != 0, f"実際 rc={r.returncode}")
+
+        # 接続を即座に拒否されるアドレスにして、トークンが出力に出ないことを見る
+        g("remote", "set-url", "origin", "https://127.0.0.1:1/x/y")
+        state("baseline.json", '{"a": 3}')
+        r = run_state("--message", "state: 秘密漏れ確認",
+                      env=dict(os.environ, GITHUB_TOKEN="SECRET_TOKEN_VALUE"))
+        check("push 失敗時もトークンを出力に漏らさない",
+              "SECRET_TOKEN_VALUE" not in (r.stdout + r.stderr) and r.returncode != 0)
+
+        r = run_state("--message", "state: トークンなし",
+                      env={k: v for k, v in os.environ.items() if k not in ("GITHUB_TOKEN", "GH_TOKEN")})
+        check("トークンが無ければ 2 で終了する", r.returncode == 2, f"実際 rc={r.returncode}")
+
     # --- ライブラリの構文と定数 ---
     import shopify_lib as sl
     check("available クエリを使っている", 'names: ["available"]' in sl.VARIANTS_QUERY)
