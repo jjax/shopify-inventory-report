@@ -1,5 +1,5 @@
 {
- "fetched_at": "2026-08-20T09:40:21.133274+09:00",
+ "fetched_at": "2026-08-23T09:40:05.379894+09:00",
  "store": "kxh8kd-dr.myshopify.com",
  "shop_name": "Omakase",
  "api_version": "2026-07",
@@ -26,7 +26,7 @@
    "sku": "",
    "display_name": "Family Plan 8 Menus | 10% discount applied - Delivery on Tue",
    "location": "Tak Moon Holdings Limited",
-   "available": 0,
+   "available": -1,
    "tracked": true
   },
   {
@@ -50,7 +50,7 @@
    "sku": "",
    "display_name": "Family Plan 8 Menus | 10% discount applied - Delivery on Thu",
    "location": "Tak Moon Holdings Limited",
-   "available": 28,
+   "available": 27,
    "tracked": true
   },
   {
@@ -74,7 +74,7 @@
    "sku": "",
    "display_name": "Family Plan 8 Menus | 10% discount applied - Delivery on Sat",
    "location": "Tak Moon Holdings Limited",
-   "available": 22,
+   "available": 20,
    "tracked": true
   }
  ]
