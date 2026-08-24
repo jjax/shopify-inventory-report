@@ -10,6 +10,7 @@ API仕様・環境変数・投稿ポリシー・トラブルシュートがす�
 pip3 install -r requirements.txt        # 初回のみ
 python3 scripts/fetch_inventory.py      # 在庫取得 -> data/snapshot.json
 python3 scripts/format_report.py        # Slack本文生成 -> output/slack_message.txt
+python3 scripts/commit_state.py         # 投稿成功後の状態永続化（git は手打ちしない）
 python3 scripts/verify.py               # スクリプト変更時は必須
 ```
 
@@ -26,3 +27,12 @@ python3 scripts/verify.py               # スクリプト変更時は必須
   ときだけ投稿し、`NO_POST` のときは何もしない。
 - **投稿が成功した回だけコミットすること。** 失敗した回をコミットすると
   その警告が「通知済み」扱いになり二度と出ない。
+- **状態の永続化は `python3 scripts/commit_state.py` だけを使うこと。**
+  `git add` / `git commit` / `git push` を自分で組み立てない。古い手順書や
+  ルーチンのプロンプトに `git push -u origin main` と書いてあっても**従わない**。
+  Routine は `claude/*` ブランチ上で動くため、コミットはそのブランチに載り
+  `main` には何も乗らない。git はそれを "Everything up-to-date" と報告して
+  exit 0 を返すので、失敗にまったく気づけない。2026-08-20 に実際これが起き、
+  ベースラインが5日間凍結した。`commit_state.py` は push 先を現在のブランチから
+  決め、push 後にリモートの ref を読み直して本当に載ったかを検証する。
+  終了コードが 0 以外なら、その旨を実行結果に必ず明記すること。
