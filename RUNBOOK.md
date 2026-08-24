@@ -47,6 +47,10 @@ python3 scripts/format_report.py       # 標準出力に POST / NO_POST
 `format_report.py` が `POST` を出したら `python3 scripts/post_slack.py` で投稿する。
 `NO_POST` のときは投稿しない（変化なし）。
 
+投稿が成功したら `python3 scripts/commit_state.py` で状態を永続化する。
+git コマンドを手で組み立てないこと（push 先ブランチを間違えても git は
+成功と報告するため。「6. トラブルシュート」参照）。
+
 `post_slack.py` の終了コード: `0`=成功 / `1`=失敗 / `2`=本文なし /
 `3`=`SLACK_WEBHOOK_URL` 未設定（Slack コネクタ経由で投稿すること）。
 
@@ -63,9 +67,12 @@ python3 scripts/format_report.py       # 標準出力に POST / NO_POST
 なく「その日の朝9時のベースライン」**。毎時のスナップショットを永続化せずに
 済ませるための設計。
 
-- **`SHOPIFY_FULL_REPORT_HOUR_JST` の回（既定9時）**: 全件一覧＋残枠少強調を
-  必ず投稿する。同時にその時点を `data/baseline.json` に保存し、
-  `data/alerted.json`（通知済み記録）を白紙に戻す。
+- **その日のベースラインがまだ無く `SHOPIFY_FULL_REPORT_HOUR_JST`（既定9時）を
+  過ぎている回**: 全件一覧＋残枠少強調を必ず投稿する。同時にその時点を
+  `data/baseline.json` に保存し、`data/alerted.json`（通知済み記録）を白紙に戻す。
+  通常は9時台の回が該当する。9時台が落ちた日は10時台以降で取り返す
+  （「9時ちょうど」の決め打ちだと `now.hour == 9` が二度と成立せず、
+  その日のベースラインが永久に作られない）。
 - **それ以外の毎時**: ベースラインと比較し、変化のうち **その日まだ通知して
   いないものだけ** を投稿する。
   - 🔴 満枠になった（1枠以上 → 0）
@@ -123,7 +130,9 @@ python3 scripts/format_report.py       # 標準出力に POST / NO_POST
 | 400 で `doesn't exist on type` | 逆にバージョンが新しすぎる。1四半期下げる |
 | 0行しか取れない | `read_products` スコープ不足が最有力 |
 | ロケーション50超の警告 | `shopify_lib.py` の `inventoryLevels(first: 50)` を増やす |
-| Slack には届くが `state:` コミットが増えない | **Routine のソースリポジトリが未設定**。`git clone https://github.com/...` で取得したクローンは読み取り専用で push できない。Routine 設定のソースに `jjax/shopify-inventory-report` を指定すると push 権限つきでクローンされる |
+| Slack には届くが `state:` コミットが増えない | 原因は2つある。**(1) Routine のソースリポジトリが未設定**。`git clone https://github.com/...` で取得したクローンは読み取り専用で push できない。Routine 設定のソースに `jjax/shopify-inventory-report` を指定すると push 権限つきでクローンされる。**(2) push 先ブランチの取り違え**（下段参照） |
+| `git push -u origin main` が "Everything up-to-date" で終わる | Routine は `claude/*` ブランチ上で動くため、コミットはそのブランチに載り `main` には何も乗らない。git はそれを成功（exit 0）と報告するので気づけない。**`python3 scripts/commit_state.py` を使うこと**（push 先を現在のブランチから決め、push 後にリモートの ref を読み直して検証する）。2026-08-20〜24 にこれでベースラインが5日間凍結した |
+| ベースラインが何日も更新されない | 上と同じか、朝9時台の回が落ちている。`auto` は「その日のベースラインが無く FULL_HOUR を過ぎている」なら全件を出して取り返すので、9時台を1回逃した程度では固定されない。それでも古いままなら push 経路を疑う。差分投稿の本文にも警告行が出る |
 | 同じ警告が毎時繰り返される | 上と同じ原因。`alerted.json` が push できず引き継がれていない |
 
 ## 7. スクリプト変更時

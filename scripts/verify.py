@@ -43,6 +43,8 @@ def run_cli(workdir, mode):
     return r.stdout.strip().splitlines()[0] if r.stdout.strip() else f"(rc={r.returncode})"
 
 
+
+
 def main():
     import format_report as fr
     T = fr.THRESHOLD
@@ -148,6 +150,45 @@ def main():
         check("full を回すと通知済み記録が消える", run_cli(td, "full") == "POST")
         with open(os.path.join(data, "alerted.json"), encoding="utf-8") as f:
             check("記録が白紙に戻る", json.load(f)["keys"] == [])
+
+    # --- auto モードの判定（2026-08-20 のベースライン5日間凍結の再発防止）---
+    from datetime import datetime as dt
+    H = fr.FULL_HOUR
+
+    def at(day, hour):
+        return dt(2026, 8, 25, hour, 40, tzinfo=fr.JST).replace(day=day)
+
+    check("ベースラインが今日なら diff", fr.pick_mode("2026-08-25", at(25, H + 3)) == "diff")
+    check("9時ちょうどの回は full", fr.pick_mode("2026-08-24", at(25, H)) == "full")
+    check("9時台を逃しても後の回で取り返す",
+          fr.pick_mode("2026-08-20", at(25, H + 5)) == "full")
+    check("FULL_HOUR 前は diff のまま", fr.pick_mode("2026-08-24", at(25, H - 7)) == "diff")
+    check("ベースライン無し＋FULL_HOUR 後は full", fr.pick_mode(None, at(25, H + 1)) == "full")
+    check("ベースラインの取得日を JST で読む",
+          fr.snapshot_date({"fetched_at": "2026-08-20T09:40:21.133274+09:00"}) == "2026-08-20")
+    check("壊れた fetched_at は None", fr.snapshot_date({"fetched_at": "???"}) is None)
+
+    # --- 古いベースラインを「本日」と偽らない ---
+    with tempfile.TemporaryDirectory() as td:
+        shutil.copytree(SCRIPTS, os.path.join(td, "scripts"))
+        data = os.path.join(td, "data")
+        os.makedirs(data)
+
+        def write(name, obj):
+            with open(os.path.join(data, name), "w", encoding="utf-8") as f:
+                json.dump(obj, f, ensure_ascii=False)
+
+        stale = "2020-01-02T09:40:00+09:00"
+        write("baseline.json", snap([row(1, "A", "HK", 30)], at=stale))
+        write("alerted.json", {"date": "2020-01-02", "keys": []})
+        write("snapshot.json", snap([row(1, "A", "HK", 0)]))
+        check("古いベースラインでも差分は出る", run_cli(td, "diff") == "POST")
+        with open(os.path.join(td, "output", "slack_message.txt"), encoding="utf-8") as f:
+            msg = f.read()
+        check("古いベースラインを本日と書かない", "本日09:40時点" not in msg,
+              f"実際のヘッダー: {msg.splitlines()[1] if len(msg.splitlines()) > 1 else msg!r}")
+        check("ベースラインの実日付を出す", "2020-01-02" in msg)
+        check("ベースラインが古いことを警告する", "ベースラインが" in msg and "⚠️" in msg)
 
     # --- ライブラリの構文と定数 ---
     import shopify_lib as sl

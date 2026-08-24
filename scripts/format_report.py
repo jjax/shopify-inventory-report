@@ -6,7 +6,9 @@
 毎時のスナップショットを永続化せずに済ませるための設計。
 
 モード:
-  auto (既定) … FULL_REPORT_HOUR_JST の回は full、それ以外は diff
+  auto (既定) … その日のベースラインがまだ無く FULL_REPORT_HOUR_JST を過ぎて
+                いれば full、そうでなければ diff。9時台の回が落ちても次の回で
+                取り返せるようにしてある（決め打ちだと永久に取り返せない）
   full        … 全件＋残枠少強調。同時にベースラインを更新し通知済み記録を消す
   diff        … ベースラインと比較し、今日まだ通知していない変化だけを出す
 
@@ -52,6 +54,27 @@ def save(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=1)
+
+
+def snapshot_date(snapshot):
+    """スナップショット/ベースラインが取得された日（JST）。読めなければ None。"""
+    at = (snapshot or {}).get("fetched_at")
+    try:
+        return datetime.fromisoformat(at).astimezone(JST).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return None
+
+
+def pick_mode(base_day, now):
+    """auto モードで full と diff のどちらを回すかを決める。
+
+    「9時ちょうどの回」だけで判定すると、その回が落ちた日は全件レポートも
+    ベースライン更新も永久に行われない（now.hour == FULL_HOUR は二度と成立
+    しないため）。実際 2026-08-20〜24 はこれでベースラインが5日間凍結した。
+    そこで「今日のベースラインがまだ無く、かつ FULL_HOUR を過ぎている」なら
+    全件を出して取り返す。成功すれば base_day == today になり、以降は diff。
+    """
+    return "full" if base_day != now.strftime("%Y-%m-%d") and now.hour >= FULL_HOUR else "diff"
 
 
 def key(row):
@@ -190,9 +213,12 @@ def main():
     rows = active_tracked(snapshot["rows"])
     now = datetime.now(JST)
     today = now.strftime("%Y-%m-%d")
-    mode = args.mode
-    if mode == "auto":
-        mode = "full" if now.hour == FULL_HOUR else "diff"
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    baseline = load(BASELINE)
+    base_day = snapshot_date(baseline)
+
+    mode = pick_mode(base_day, now) if args.mode == "auto" else args.mode
 
     shop = snapshot.get("shop_name") or snapshot["store"]
     header = [f"📦 *残枠レポート* — {shop}",
@@ -205,7 +231,6 @@ def main():
         body = build_full(rows)
         print(f"[情報] ベースラインを更新（{len(rows)}行）", file=sys.stderr)
     else:
-        baseline = load(BASELINE)
         if not baseline:
             print("NO_POST")
             print(f"[情報] ベースライン未作成。朝{FULL_HOUR}時の全件実行を待つこと。",
@@ -228,9 +253,23 @@ def main():
         seen.update(f"{a[0]}|{key(a[1])}" for a in fresh)
         save(ALERTED, {"date": today, "keys": sorted(seen)})
 
+        # ベースラインが今日のものとは限らないので「本日」と決め打ちしない。
+        # 5日前の基準を「本日09:40時点」と書くと数字の意味が変わってしまう。
         base_time = (baseline.get("fetched_at") or "")[11:16]
-        header[1] = f"_{now.strftime('%Y-%m-%d %H:%M')} JST — 本日{base_time}時点との比較_"
+        if base_day == today:
+            when = f"本日{base_time}"
+        elif base_day == yesterday:
+            when = f"昨日{base_time}"
+        else:
+            when = f"{base_day or '取得時刻不明'} {base_time}".strip()
+        header[1] = f"_{now.strftime('%Y-%m-%d %H:%M')} JST — {when}時点との比較_"
+
         body = fmt_alerts(fresh, bool(single_location(rows)))
+        if base_day not in (today, yesterday):
+            # 朝9時の全件実行か state コミットが通っていない。放置すると
+            # 差分の基準が古いまま固定されるので、Slack 側にも出して気づけるようにする。
+            body.append(f"_⚠️ ベースラインが {base_day or '不明'} のまま更新されていません。"
+                        f"朝{FULL_HOUR}時の全件実行と state コミットの成否を確認すること。_")
         print(f"[情報] 新規{len(fresh)}件 / 変化{len(alerts)}件", file=sys.stderr)
 
     for w in snapshot.get("warnings") or []:
